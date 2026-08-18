@@ -2,6 +2,9 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, Shield, AlertCircle, Loader2, Lock, CheckCircle } from 'lucide-react'
 import { useLanguage } from '../../i18n/LanguageContext'
+import { ensureDemoUser, loginUser } from '../../lib/mockAuth'
+import { DEMO_PASSWORD } from '../../lib/demoAccount'
+import { studentProfile } from '../../data/student'
 
 type LoginState = 'idle' | 'loading' | 'invalid' | 'unverified' | 'locked' | 'success' | 'expired'
 
@@ -14,18 +17,32 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(false)
   const [state, setState] = useState<LoginState>('idle')
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setState('loading')
-    setTimeout(() => {
-      if (email === 'locked@student.edu.vn') return setState('locked')
-      if (email === 'unverified@student.edu.vn') return setState('unverified')
-      if (email === 'mfa@student.edu.vn') {
+
+    // Demo-only shortcuts to preview other UI states without a real account.
+    if (email === 'locked@student.edu.vn') return setTimeout(() => setState('locked'), 1200)
+    if (email === 'unverified@student.edu.vn') return setTimeout(() => setState('unverified'), 1200)
+    if (password === 'wrong') return setTimeout(() => setState('invalid'), 1200)
+
+    // Real credential + MFA check against the seeded demo account (mock backend).
+    const normalized = email.trim().toLowerCase()
+    if (normalized === studentProfile.email.toLowerCase()) {
+      await ensureDemoUser(studentProfile.email, studentProfile.fullName, DEMO_PASSWORD)
+      const result = await loginUser(studentProfile.email, password)
+      setTimeout(() => {
+        if (!result.ok) {
+          if (result.reason === 'locked') return setState('locked')
+          return setState('invalid')
+        }
         setState('success')
-        setTimeout(() => navigate('/two-factor'), 800)
-        return
-      }
-      if (password === 'wrong') return setState('invalid')
+        setTimeout(() => navigate(result.mfaRequired ? '/two-factor' : '/dashboard', { state: { email: studentProfile.email } }), 800)
+      }, 1200)
+      return
+    }
+
+    setTimeout(() => {
       if (email && password) {
         setState('success')
         setTimeout(() => navigate('/dashboard'), 800)
@@ -134,6 +151,9 @@ export default function LoginPage() {
         <div className="mt-4 flex items-center justify-center gap-2 text-xs text-gray-500">
           <Shield size={13} className="text-[#16A34A]" />
           <span>{t('login_mfa_notice')}</span>
+        </div>
+        <div className="mt-2 text-center text-xs text-gray-400">
+          Demo: {studentProfile.email} / {DEMO_PASSWORD} (bật MFA trong Cài đặt → Bảo mật)
         </div>
       </div>
     </div>

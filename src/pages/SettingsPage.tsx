@@ -8,6 +8,8 @@ import { useToast } from '../components/Toast'
 import { useLanguage } from '../i18n/LanguageContext'
 import { studentProfile } from '../data/student'
 import QRCodeSVG from '../components/QRCode'
+import { confirmMfaEnrollment, disableMfa, ensureDemoUser, getUser, regenerateRecoveryCodes, startMfaEnrollment, verifyMfaCode } from '../lib/mockAuth'
+import { DEMO_PASSWORD } from '../lib/demoAccount'
 
 // ─── OTP input ────────────────────────────────────────────────────────────────
 function OTPInputs({ value, onChange, error }: { value: string[]; onChange: (v: string[]) => void; error?: boolean }) {
@@ -34,13 +36,6 @@ function OTPInputs({ value, onChange, error }: { value: string[]; onChange: (v: 
   )
 }
 
-// ─── Recovery codes ────────────────────────────────────────────────────────────
-const RECOVERY_CODES = [
-  'A3F2-8KX1-P9QR', 'B7HN-2MWT-6VYZ', 'C1DJ-5LSU-0EGI',
-  'D4GP-9NXV-3AHJ', 'E6IQ-1OYW-7BKL', 'F8KR-4PZX-2CMN',
-  'G0MS-7QAY-5DOP', 'H2NT-3RBZ-8EFQ',
-]
-
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 const sessions = [
   { id: 1, device: 'MacBook Pro', browser: 'Chrome 126', os: 'macOS 14', ip: '203.xxx.xxx.12', location: 'TP. Hồ Chí Minh, VN', lastActive: 'Ngay bây giờ', current: true, trusted: true },
@@ -60,34 +55,53 @@ function Setup2FAModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [codesChecked, setCodesChecked] = useState(false)
+  const [secret, setSecret] = useState('')
+  const [otpauthUri, setOtpauthUri] = useState('')
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([])
   const { toast } = useToast()
 
-  const SECRET = 'JBSWY3DPEHPK3PXP'
+  const email = studentProfile.email
 
-  const next = (fn: () => void) => { setLoading(true); setTimeout(() => { setLoading(false); fn() }, 900) }
-
-  const step1Submit = (e: React.FormEvent) => {
+  const step1Submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!password || password.length < 6) { setPwdError(t('setup_s1_err')); return }
-    next(() => { setPwdError(''); setStep(2) })
+    setLoading(true)
+    // Confirm the account password before allowing MFA setup to begin.
+    await ensureDemoUser(email, studentProfile.fullName, DEMO_PASSWORD)
+    if (password !== DEMO_PASSWORD) {
+      setLoading(false)
+      setPwdError(t('setup_s1_err'))
+      return
+    }
+    const { secret: newSecret, otpauthUri: uri } = startMfaEnrollment(email)
+    setSecret(newSecret)
+    setOtpauthUri(uri)
+    setLoading(false)
+    setPwdError('')
+    setStep(2)
   }
 
-  const step3Submit = (e: React.FormEvent) => {
+  const step3Submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const code = otp.join('')
-    if (code === '111111') { setOtpError(true); return }
-    next(() => { setOtpError(false); setStep(4) })
+    setLoading(true)
+    const result = await confirmMfaEnrollment(email, code)
+    setLoading(false)
+    if (!result.ok) { setOtpError(true); return }
+    setOtpError(false)
+    setRecoveryCodes(result.recoveryCodes)
+    setStep(4)
   }
 
   const copySecret = () => {
-    navigator.clipboard.writeText(SECRET).catch(() => {})
+    navigator.clipboard.writeText(secret).catch(() => {})
     setCopied(true)
     toast('success', t('toast_secret_title'), t('toast_secret_msg'))
     setTimeout(() => setCopied(false), 2000)
   }
 
   const copyCodes = () => {
-    navigator.clipboard.writeText(RECOVERY_CODES.join('\n')).catch(() => {})
+    navigator.clipboard.writeText(recoveryCodes.join('\n')).catch(() => {})
     toast('success', t('toast_codes_title'), t('toast_codes_msg'))
   }
 
@@ -151,9 +165,9 @@ function Setup2FAModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
                 <p>{t('setup_s2_step2')} <strong>+</strong> → <strong>{t('setup_s2_scan')}</strong> {t('setup_s2_scan_suffix')}</p>
               </div>
 
-              {/* QR code — unchanged */}
+              {/* Real QR code encoding the otpauth:// URI for this account */}
               <div className="flex flex-col items-center" translate="no">
-                <QRCodeSVG size={176} />
+                <QRCodeSVG value={otpauthUri} size={176} />
                 <p className="text-xs text-gray-400 mt-2">{t('setup_s2_issuer')}</p>
               </div>
 
@@ -161,7 +175,7 @@ function Setup2FAModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
               <div className="bg-gray-50 rounded-xl p-3">
                 <p className="text-xs text-gray-500 mb-2">{t('setup_s2_manual')}</p>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 font-mono text-sm text-gray-800 tracking-widest">{SECRET}</code>
+                  <code className="flex-1 font-mono text-sm text-gray-800 tracking-widest">{secret}</code>
                   <button onClick={copySecret} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${copied ? 'bg-green-100 text-green-600' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                     {copied ? <><CheckCircle size={12} /> {t('copied')}</> : <><Copy size={12} /> {t('copy')}</>}
                   </button>
@@ -189,7 +203,7 @@ function Setup2FAModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
                 </div>
               )}
               <OTPInputs value={otp} onChange={v => { setOtp(v); setOtpError(false) }} error={otpError} />
-              <p className="text-xs text-gray-400 text-center">{t('setup_s3_demo')} <code className="bg-gray-100 px-1 rounded">111111</code>{t('setup_s3_demo_suffix')}</p>
+              <p className="text-xs text-gray-400 text-center">Nhập mã 6 chữ số hiện đang hiển thị trên ứng dụng Authenticator của bạn.</p>
               <button type="submit" disabled={otp.join('').length < 6 || loading} className="w-full bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-blue-300 text-white font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2">
                 {loading ? <><Loader2 size={15} className="animate-spin" /> {t('setup_s3_verifying')}</> : t('setup_s3_btn')}
               </button>
@@ -205,7 +219,7 @@ function Setup2FAModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
               </div>
 
               <div className="grid grid-cols-2 gap-2 bg-gray-50 rounded-xl p-4">
-                {RECOVERY_CODES.map(c => (
+                {recoveryCodes.map(c => (
                   <code key={c} className="font-mono text-xs text-gray-800 bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-center">{c}</code>
                 ))}
               </div>
@@ -252,11 +266,16 @@ function Disable2FAModal({ onClose, onDisable }: { onClose: () => void; onDisabl
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!password || totp.join('').length < 6) { setErr(t('disable_err')); return }
     setLoading(true)
-    setTimeout(() => { setLoading(false); onDisable(); onClose() }, 1000)
+    const result = await verifyMfaCode(studentProfile.email, totp.join(''))
+    setLoading(false)
+    if (!result.ok || password !== DEMO_PASSWORD) { setErr(t('disable_err')); return }
+    disableMfa(studentProfile.email)
+    onDisable()
+    onClose()
   }
 
   return (
@@ -309,11 +328,12 @@ export default function SettingsPage() {
   const { toast } = useToast()
   const { t } = useLanguage()
   const [tab, setTab] = useState<Tab>('security')
-  const [mfaEnabled, setMfaEnabled] = useState(false)
+  const [mfaEnabled, setMfaEnabled] = useState(() => getUser(studentProfile.email)?.mfaEnabled ?? false)
   const [showSetup, setShowSetup] = useState(false)
   const [showDisable, setShowDisable] = useState(false)
   const [showCodes, setShowCodes] = useState(false)
   const [codesVisible, setCodesVisible] = useState(false)
+  const [viewCodes, setViewCodes] = useState<string[]>([])
   const [activeSessions, setActiveSessions] = useState(sessions)
   const [darkMode, setDarkMode] = useState(false)
   const [notifPrefs, setNotifPrefs] = useState({ email: true, academic: true, security: true, exam: true, tuition: false, event: false })
@@ -427,7 +447,7 @@ export default function SettingsPage() {
                       <button onClick={() => setShowSetup(true)} className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 text-gray-700 text-sm font-medium rounded-xl hover:bg-gray-50">
                         <RefreshCw size={14} /> {t('settings_security_reconfigure')}
                       </button>
-                      <button onClick={() => setShowCodes(true)} className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 text-gray-700 text-sm font-medium rounded-xl hover:bg-gray-50">
+                      <button onClick={() => { setViewCodes((getUser(studentProfile.email)?.recoveryCodes ?? []).filter(c => !c.used).map(c => c.code)); setShowCodes(true) }} className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 text-gray-700 text-sm font-medium rounded-xl hover:bg-gray-50">
                         <Key size={14} /> {t('settings_security_view_codes')}
                       </button>
                       <button onClick={() => setShowDisable(true)} className="flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 text-sm font-medium rounded-xl hover:bg-red-50">
@@ -626,16 +646,16 @@ export default function SettingsPage() {
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2">
-                {RECOVERY_CODES.map(c => (
+                {viewCodes.map(c => (
                   <code key={c} className={`font-mono text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-center ${!codesVisible ? 'text-gray-50 select-none' : 'text-gray-800'}`}>{c}</code>
                 ))}
               </div>
             </div>
-            <div className="text-xs text-gray-500 mb-4">8 {t('codes_remaining')}</div>
+            <div className="text-xs text-gray-500 mb-4">{viewCodes.length} {t('codes_remaining')}</div>
             <div className="flex gap-2">
-              <button onClick={() => { navigator.clipboard.writeText(RECOVERY_CODES.join('\n')).catch(() => {}); toast('success', t('toast_codes_title'), t('toast_codes_msg')) }} className="flex-1 flex items-center justify-center gap-1.5 border border-gray-200 text-gray-700 text-sm font-medium py-2 rounded-xl hover:bg-gray-50"><Copy size={13} /> {t('copy')}</button>
+              <button onClick={() => { navigator.clipboard.writeText(viewCodes.join('\n')).catch(() => {}); toast('success', t('toast_codes_title'), t('toast_codes_msg')) }} className="flex-1 flex items-center justify-center gap-1.5 border border-gray-200 text-gray-700 text-sm font-medium py-2 rounded-xl hover:bg-gray-50"><Copy size={13} /> {t('copy')}</button>
               <button className="flex-1 flex items-center justify-center gap-1.5 border border-gray-200 text-gray-700 text-sm font-medium py-2 rounded-xl hover:bg-gray-50"><Download size={13} /> {t('download')}</button>
-              <button onClick={() => toast('warning', t('toast_codes_regen_title'), t('toast_codes_regen_msg'))} className="flex-1 flex items-center justify-center gap-1.5 border border-amber-200 text-amber-600 text-sm font-medium py-2 rounded-xl hover:bg-amber-50"><RefreshCw size={13} /> {t('codes_regenerate')}</button>
+              <button onClick={() => { const codes = regenerateRecoveryCodes(studentProfile.email); setViewCodes(codes); setCodesVisible(true); toast('warning', t('toast_codes_regen_title'), t('toast_codes_regen_msg')) }} className="flex-1 flex items-center justify-center gap-1.5 border border-amber-200 text-amber-600 text-sm font-medium py-2 rounded-xl hover:bg-amber-50"><RefreshCw size={13} /> {t('codes_regenerate')}</button>
             </div>
           </div>
         </div>

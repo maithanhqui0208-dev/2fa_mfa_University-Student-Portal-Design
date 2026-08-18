@@ -1,14 +1,18 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Shield, KeyRound, Mail, Phone, CheckCircle, AlertCircle, Loader2, ArrowLeft, AlertTriangle } from 'lucide-react'
 import { useLanguage } from '../../i18n/LanguageContext'
+import { verifyRecoveryCode } from '../../lib/mockAuth'
+import { studentProfile } from '../../data/student'
 
 type Method = 'code' | 'email' | 'support'
 type State = 'idle' | 'loading' | 'invalid' | 'success' | 'used'
 
 export default function RecoveryPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { t } = useLanguage()
+  const email = (location.state as { email?: string } | null)?.email ?? studentProfile.email
   const [method, setMethod] = useState<Method>('code')
   const [code, setCode] = useState('')
   const [state, setState] = useState<State>('idle')
@@ -17,10 +21,10 @@ export default function RecoveryPage() {
     e.preventDefault()
     setState('loading')
     setTimeout(() => {
-      if (code === 'USED-CODE-1111') return setState('used')
-      if (code.length < 8) return setState('invalid')
+      const ok = verifyRecoveryCode(email, code)
+      if (!ok) return setState('invalid')
       setState('success')
-    }, 1200)
+    }, 900)
   }
 
   if (state === 'success') {

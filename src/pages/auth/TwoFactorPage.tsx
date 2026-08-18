@@ -1,25 +1,42 @@
-import { useState, useRef } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useState, useRef, useEffect } from 'react'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Shield, Smartphone, AlertCircle, CheckCircle, Loader2, Clock, ArrowLeft } from 'lucide-react'
 import { useLanguage } from '../../i18n/LanguageContext'
+import { verifyMfaCode } from '../../lib/mockAuth'
+import { studentProfile } from '../../data/student'
+import { secondsRemaining } from '../../lib/totp'
 
 type State = 'idle' | 'loading' | 'invalid' | 'expired' | 'locked' | 'success'
 
 export default function TwoFactorPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { t } = useLanguage()
+  const email = (location.state as { email?: string } | null)?.email ?? studentProfile.email
   const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const [state, setState] = useState<State>('idle')
   const [trust, setTrust] = useState(false)
   const [progress, setProgress] = useState(100)
+  const [lockSecondsLeft, setLockSecondsLeft] = useState(0)
   const refs = useRef<(HTMLInputElement | null)[]>([])
 
-  useState(() => {
+  useEffect(() => {
     const id = setInterval(() => {
-      setProgress(p => { if (p <= 0) return 100; return p - (100 / 30) })
+      setProgress((secondsRemaining() / 30) * 100)
     }, 1000)
     return () => clearInterval(id)
-  })
+  }, [])
+
+  useEffect(() => {
+    if (state !== 'locked' || lockSecondsLeft <= 0) return
+    const id = setInterval(() => {
+      setLockSecondsLeft(s => {
+        if (s <= 1) { setState('idle'); return 0 }
+        return s - 1
+      })
+    }, 1000)
+    return () => clearInterval(id)
+  }, [state, lockSecondsLeft])
 
   const handleChange = (i: number, val: string) => {
     if (!/^\d*$/.test(val)) return
@@ -38,17 +55,24 @@ export default function TwoFactorPage() {
     e.preventDefault()
   }
 
-  const handleVerify = () => {
+  const handleVerify = async () => {
     const code = otp.join('')
     if (code.length < 6) return
     setState('loading')
-    setTimeout(() => {
-      if (code === '000000') return setState('locked')
-      if (code === '999999') return setState('expired')
-      if (code === '111111') return setState('invalid')
-      setState('success')
-      setTimeout(() => navigate('/dashboard'), 900)
-    }, 1200)
+    const result = await verifyMfaCode(email, code)
+    if (!result.ok) {
+      if (result.reason === 'locked') {
+        setLockSecondsLeft(Math.ceil((result.retryAfterMs ?? 0) / 1000))
+        setState('locked')
+      } else {
+        setState('invalid')
+      }
+      setOtp(['', '', '', '', '', ''])
+      refs.current[0]?.focus()
+      return
+    }
+    setState('success')
+    setTimeout(() => navigate('/dashboard'), 900)
   }
 
   const otpError = state === 'invalid' || state === 'expired' || state === 'locked'
@@ -56,7 +80,7 @@ export default function TwoFactorPage() {
   const alerts: Record<string, { text: string; color: string; icon: React.ReactNode }> = {
     invalid: { text: t('tfa_err_invalid'), color: 'bg-red-50 border-red-200 text-red-700', icon: <AlertCircle size={14} className="text-red-500" /> },
     expired: { text: t('tfa_err_expired'), color: 'bg-amber-50 border-amber-200 text-amber-700', icon: <Clock size={14} className="text-amber-500" /> },
-    locked: { text: t('tfa_err_locked'), color: 'bg-red-50 border-red-200 text-red-700', icon: <AlertCircle size={14} className="text-red-500" /> },
+    locked: { text: `${t('tfa_err_locked')} (${lockSecondsLeft}s)`, color: 'bg-red-50 border-red-200 text-red-700', icon: <AlertCircle size={14} className="text-red-500" /> },
     success: { text: t('tfa_err_success'), color: 'bg-green-50 border-green-200 text-green-700', icon: <CheckCircle size={14} className="text-green-500" /> },
   }
 
@@ -137,8 +161,8 @@ export default function TwoFactorPage() {
           </button>
 
           <div className="space-y-2 text-center">
-            <Link to="/recovery" className="block text-sm text-[#2563EB] hover:text-[#1E3A8A]">{t('tfa_recovery_link')}</Link>
-            <Link to="/recovery" className="block text-sm text-gray-500 hover:text-gray-700">{t('tfa_no_access')}</Link>
+            <Link to="/recovery" state={{ email }} className="block text-sm text-[#2563EB] hover:text-[#1E3A8A]">{t('tfa_recovery_link')}</Link>
+            <Link to="/recovery" state={{ email }} className="block text-sm text-gray-500 hover:text-gray-700">{t('tfa_no_access')}</Link>
           </div>
         </div>
 
