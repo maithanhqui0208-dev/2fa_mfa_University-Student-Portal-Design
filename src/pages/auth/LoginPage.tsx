@@ -11,8 +11,8 @@ type LoginState = 'idle' | 'loading' | 'invalid' | 'unverified' | 'locked' | 'su
 export default function LoginPage() {
   const navigate = useNavigate()
   const { t } = useLanguage()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState(studentProfile.email)
+  const [password, setPassword] = useState(DEMO_PASSWORD)
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(false)
   const [state, setState] = useState<LoginState>('idle')
@@ -21,34 +21,26 @@ export default function LoginPage() {
     e.preventDefault()
     setState('loading')
 
-    // Demo-only shortcuts to preview other UI states without a real account.
-    if (email === 'locked@student.edu.vn') return setTimeout(() => setState('locked'), 1200)
-    if (email === 'unverified@student.edu.vn') return setTimeout(() => setState('unverified'), 1200)
-    if (password === 'wrong') return setTimeout(() => setState('invalid'), 1200)
+    // Demo-only shortcuts to preview other UI states without touching real accounts.
+    if (email === 'locked@student.edu.vn') { setTimeout(() => setState('locked'), 1200); return }
+    if (email === 'unverified@student.edu.vn') { setTimeout(() => setState('unverified'), 1200); return }
 
-    // Real credential + MFA check against the seeded demo account (mock backend).
     const normalized = email.trim().toLowerCase()
+    // Seed the built-in demo account on first use so it's always available.
     if (normalized === studentProfile.email.toLowerCase()) {
       await ensureDemoUser(studentProfile.email, studentProfile.fullName, DEMO_PASSWORD)
-      const result = await loginUser(studentProfile.email, password)
-      setTimeout(() => {
-        if (!result.ok) {
-          if (result.reason === 'locked') return setState('locked')
-          return setState('invalid')
-        }
-        setState('success')
-        setTimeout(() => navigate(result.mfaRequired ? '/two-factor' : '/dashboard', { state: { email: studentProfile.email } }), 800)
-      }, 1200)
-      return
     }
 
+    // Real credential + MFA check against the mock account store - covers both
+    // the seeded demo account and any account created via the register page.
+    const result = await loginUser(email, password)
     setTimeout(() => {
-      if (email && password) {
-        setState('success')
-        setTimeout(() => navigate('/dashboard'), 800)
-      } else {
-        setState('invalid')
+      if (!result.ok) {
+        if (result.reason === 'locked') return setState('locked')
+        return setState('invalid')
       }
+      setState('success')
+      setTimeout(() => navigate(result.mfaRequired ? '/two-factor' : '/dashboard', { state: { email: normalized } }), 800)
     }, 1200)
   }
 

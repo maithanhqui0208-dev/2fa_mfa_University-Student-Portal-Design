@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, Shield, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 import { useLanguage } from '../../i18n/LanguageContext'
+import { getUser, registerUser } from '../../lib/mockAuth'
 
 function PasswordStrength({ password }: { password: string }) {
   const { t } = useLanguage()
@@ -62,7 +63,7 @@ export default function RegisterPage() {
     if (!form.studentId.trim()) e.studentId = t('register_err_id_required')
     if (form.studentId === 'SV2021000001') e.studentId = t('register_err_id_exists')
     if (!form.email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) e.email = t('register_err_email')
-    if (form.email === 'taken@student.edu.vn') e.email = t('register_err_email_taken')
+    if (form.email === 'taken@student.edu.vn' || getUser(form.email)) e.email = t('register_err_email_taken')
     if (!form.phone.trim()) e.phone = t('register_err_phone')
     if (!form.faculty) e.faculty = t('register_err_faculty')
     if (!form.major) e.major = t('register_err_major')
@@ -81,7 +82,10 @@ export default function RegisterPage() {
     setTouched(Object.fromEntries(Object.keys(errs).map(k => [k, true])))
     if (Object.keys(errs).length > 0) return
     setLoading(true)
-    setTimeout(() => { setLoading(false); navigate('/verify') }, 1500)
+    registerUser(form.email, form.password, form.fullName).then(() => {
+      setLoading(false)
+      navigate('/verify', { state: { email: form.email.trim().toLowerCase() } })
+    })
   }
 
   const field = (key: string, label: string, type = 'text', placeholder = '') => (
