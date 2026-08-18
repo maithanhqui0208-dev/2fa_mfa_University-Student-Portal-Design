@@ -13,7 +13,6 @@ Giao diện cổng thông tin sinh viên (dashboard, lịch học, điểm số,
 
 ## Xác thực hai yếu tố (MFA/TOTP)
 
-Repo tích hợp MFA dựa trên TOTP (RFC 6238) chạy hoàn toàn phía client (Web Crypto API), mô phỏng backend bằng localStorage — phù hợp cho demo/đồ án, **không dùng cho production**.
 
 - `src/lib/totp.ts` — sinh secret Base32, tạo `otpauth://` URI, tính/so khớp mã TOTP (dung sai ±1 bước 30s), chống replay, sinh mã khôi phục.
 - `src/lib/mockAuth.ts` — mô phỏng backend: đăng ký/đăng nhập (hash mật khẩu), khóa tạm sau 5 lần sai (lockout 30s) cho cả login và OTP, thiết lập/kích hoạt MFA, xác thực OTP khi đăng nhập, xác thực mã khôi phục, cấp session dạng JWT giả.
